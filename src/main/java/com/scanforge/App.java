@@ -1,14 +1,15 @@
 package com.scanforge;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.util.*;
+import java.util.stream.Stream;
 
 public class App {
-  public static void main(String[] args) throws Exception, IOException {
+  public static void main(String[] args) throws Exception {
 
+    // Validate args
     if (args.length < 2) {
       System.out.println("Usage: scanforge <path> <extensions...>");
       return;
@@ -28,6 +29,7 @@ public class App {
       return;
     }
 
+    // Normalize required extensions
     String[] requiredFileExtensions = Arrays.copyOfRange(args, 1, args.length);
 
     Set<String> requiredExtensions = new HashSet<>();
@@ -39,6 +41,11 @@ public class App {
       requiredExtensions.add(ext);
     }
 
+    // Start clipboard process
+    Process process = new ProcessBuilder("pbcopy").start();
+    OutputStream outputStream = process.getOutputStream();
+
+    // Traverse and process files
     Files.walk(path)
         .filter(Files::isRegularFile)
         .forEach(
@@ -51,14 +58,28 @@ public class App {
               String ext = fileName.substring(index).toLowerCase();
 
               if (requiredExtensions.contains(ext)) {
-                System.out.println("\n===== file: " + p.toAbsolutePath() + " =====");
+                String header = "\n===== file: " + p.toAbsolutePath() + " =====\n";
 
                 try {
-                  Files.lines(p).forEach(System.out::println);
-                } catch (Exception e) {
-                  System.out.println("Error reading file: " + p.toAbsolutePath());
+                  outputStream.write(header.getBytes(StandardCharsets.UTF_8));
+
+                  try (Stream<String> lines = Files.lines(p)) {
+                    lines.forEach(
+                        line -> {
+                          try {
+                            outputStream.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+                          } catch (Exception ignored) {
+                          }
+                        });
+                  }
+
+                } catch (Exception ignored) {
+                  // skip unreadable files
                 }
               }
             });
+
+    outputStream.close();
+    process.waitFor();
   }
 }
