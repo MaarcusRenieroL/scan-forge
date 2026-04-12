@@ -28,5 +28,21 @@ public class App {
     Files.walk(path)
         .filter(Files::isRegularFile)
         .forEach(p -> System.out.println(p.toAbsolutePath()));
+    Set<String> existingFileExtensions = new HashSet<>();
+
+    Files.walk(path)
+        .filter(Files::isRegularFile)
+        .forEach(
+            p -> {
+              String fileName = p.getFileName().toString();
+              int index = fileName.lastIndexOf('.');
+
+              if (index == -1 || index == 0) return;
+
+              String ext = fileName.substring(index).toLowerCase();
+              existingFileExtensions.add(ext);
+            });
+
+    existingFileExtensions.forEach(System.out::println);
   }
 }
