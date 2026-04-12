@@ -38,7 +38,20 @@ public class App {
       requiredExtensions.add(ext);
     }
 
-    System.out.println("Required extensions:");
-    requiredExtensions.forEach(System.out::println);
+    Files.walk(path)
+        .filter(Files::isRegularFile)
+        .forEach(
+            p -> {
+              String fileName = p.getFileName().toString();
+              int index = fileName.lastIndexOf('.');
+
+              if (index == -1 || index == 0) return;
+
+              String ext = fileName.substring(index).toLowerCase();
+
+              if (requiredExtensions.contains(ext)) {
+                System.out.println(p.toAbsolutePath());
+              }
+            });
   }
 }
