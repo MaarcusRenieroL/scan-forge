@@ -9,14 +9,31 @@ import java.util.stream.Stream;
 public class App {
 
   public static void main(String[] args) {
-
     try {
-      validateArgs(args);
+      Path path;
+      List<String> extArgs = new ArrayList<>();
 
-      Path path = Paths.get(args[0]);
+      if (args.length == 0) {
+        path = Paths.get(".");
+      } else {
+        Path possiblePath = Paths.get(args[0]);
+        if (Files.exists(possiblePath)) {
+          path = possiblePath;
+          extArgs = Arrays.asList(Arrays.copyOfRange(args, 1, args.length));
+        } else {
+          path = Paths.get(".");
+          extArgs = Arrays.asList(args);
+        }
+      }
+
       validatePath(path);
 
-      Set<String> requiredExtensions = normalizeExtensions(args);
+      Set<String> existingExtensions = collectExtensions(path);
+
+      Set<String> requiredExtensions =
+          extArgs.isEmpty()
+              ? ExtensionSelector.select(existingExtensions)
+              : normalizeExtensions(extArgs);
 
       Set<String> ignoredExtensions = new HashSet<>();
       Set<String> ignoredFolders = new HashSet<>();
@@ -26,11 +43,26 @@ public class App {
 
       run(path, requiredExtensions, ignoredExtensions, ignoredFolders, ignoredNames);
 
-    } catch (IllegalArgumentException e) {
-      logError(e);
     } catch (Exception e) {
       logError(e);
     }
+  }
+
+  private static Set<String> collectExtensions(Path path) throws IOException {
+    Set<String> extensions = new HashSet<>();
+
+    try (Stream<Path> paths = Files.walk(path)) {
+      paths
+          .filter(Files::isRegularFile)
+          .forEach(
+              p -> {
+                String name = p.getFileName().toString();
+                int i = name.lastIndexOf('.');
+                if (i > 0) extensions.add(name.substring(i).toLowerCase());
+              });
+    }
+
+    return extensions;
   }
 
   private static void run(
@@ -38,89 +70,23 @@ public class App {
       Set<String> requiredExtensions,
       Set<String> ignoredExtensions,
       Set<String> ignoredFolders,
-      Set<String> ignoredNames) {
+      Set<String> ignoredNames)
+      throws Exception {
 
-    try {
-      Process process = new ProcessBuilder("pbcopy").start();
+    Process process = new ProcessBuilder("pbcopy").start();
 
-      try (OutputStream outputStream = process.getOutputStream();
-          Stream<Path> paths = Files.walk(path)) {
+    try (OutputStream os = process.getOutputStream();
+        Stream<Path> paths = Files.walk(path)) {
 
-        paths
-            .filter(Files::isRegularFile)
-            .forEach(
-                p ->
-                    processFile(
-                        p,
-                        requiredExtensions,
-                        ignoredExtensions,
-                        ignoredFolders,
-                        ignoredNames,
-                        outputStream));
-      }
-
-      process.waitFor();
-
-    } catch (IOException e) {
-      logError(e);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      logError(e);
+      paths
+          .filter(Files::isRegularFile)
+          .forEach(
+              p ->
+                  processFile(
+                      p, requiredExtensions, ignoredExtensions, ignoredFolders, ignoredNames, os));
     }
-  }
 
-  private static void validateArgs(String[] args) {
-    if (args.length < 2) {
-      throw new IllegalArgumentException("Usage: scanforge <path> <extensions...>");
-    }
-  }
-
-  private static void validatePath(Path path) {
-    if (!Files.exists(path) || !Files.isDirectory(path)) {
-      throw new IllegalArgumentException("Invalid directory path");
-    }
-  }
-
-  private static Set<String> normalizeExtensions(String[] args) {
-    Set<String> extensions = new HashSet<>();
-    for (int i = 1; i < args.length; i++) {
-      String ext = args[i].toLowerCase();
-      if (!ext.startsWith(".")) ext = "." + ext;
-      extensions.add(ext);
-    }
-    return extensions;
-  }
-
-  private static void loadGitignore(
-      Path path,
-      Set<String> ignoredExtensions,
-      Set<String> ignoredFolders,
-      Set<String> ignoredNames) {
-
-    Path gitignorePath = path.resolve(".gitignore");
-
-    if (!Files.exists(gitignorePath)) return;
-
-    try {
-      List<String> lines = Files.readAllLines(gitignorePath);
-
-      for (String line : lines) {
-        line = line.trim();
-
-        if (line.isEmpty() || line.startsWith("#")) continue;
-
-        if (line.startsWith("*.")) {
-          ignoredExtensions.add(line.substring(1).toLowerCase());
-        } else if (line.endsWith("/")) {
-          ignoredFolders.add(line.substring(0, line.length() - 1));
-        } else {
-          ignoredNames.add(line);
-        }
-      }
-
-    } catch (IOException e) {
-      logError(e);
-    }
+    process.waitFor();
   }
 
   private static void processFile(
@@ -129,22 +95,22 @@ public class App {
       Set<String> ignoredExtensions,
       Set<String> ignoredFolders,
       Set<String> ignoredNames,
-      OutputStream outputStream) {
+      OutputStream os) {
 
     try {
-      String fileName = p.getFileName().toString();
+      String name = p.getFileName().toString();
 
-      if (isIgnored(p, fileName, ignoredExtensions, ignoredFolders, ignoredNames)) return;
+      if (isIgnored(p, name, ignoredExtensions, ignoredFolders, ignoredNames)) return;
 
-      int index = fileName.lastIndexOf('.');
-      if (index == -1 || index == 0) return;
+      int i = name.lastIndexOf('.');
+      if (i <= 0) return;
 
-      String ext = fileName.substring(index).toLowerCase();
+      String ext = name.substring(i).toLowerCase();
 
       if (!requiredExtensions.contains(ext)) return;
       if (isBinaryFile(p)) return;
 
-      writeFile(p, outputStream);
+      writeFile(p, os);
 
     } catch (Exception e) {
       logError(e);
@@ -153,45 +119,37 @@ public class App {
 
   private static boolean isIgnored(
       Path p,
-      String fileName,
+      String name,
       Set<String> ignoredExtensions,
       Set<String> ignoredFolders,
       Set<String> ignoredNames) {
 
-    for (String folder : ignoredFolders) {
-      if (p.toString().contains("/" + folder + "/")) return true;
+    for (Path part : p) {
+      String segment = part.toString();
+
+      if (ignoredFolders.contains(segment)) return true;
+      if (ignoredNames.contains(segment)) return true;
     }
 
-    if (ignoredNames.contains(fileName)) return true;
+    if (ignoredNames.contains(name)) return true;
 
-    int index = fileName.lastIndexOf('.');
-    if (index != -1 && index != 0) {
-      String ext = fileName.substring(index).toLowerCase();
+    int i = name.lastIndexOf('.');
+    if (i > 0) {
+      String ext = name.substring(i).toLowerCase();
       if (ignoredExtensions.contains(ext)) return true;
     }
 
     return false;
   }
 
-  private static void writeFile(Path p, OutputStream outputStream) {
+  private static void writeFile(Path p, OutputStream os) throws IOException {
     String header = "\n===== file: " + p.toAbsolutePath() + " =====\n";
+    os.write(header.getBytes(StandardCharsets.UTF_8));
 
-    try {
-      outputStream.write(header.getBytes(StandardCharsets.UTF_8));
-
-      try (Stream<String> lines = Files.lines(p)) {
-        lines.forEach(
-            line -> {
-              try {
-                outputStream.write((line + "\n").getBytes(StandardCharsets.UTF_8));
-              } catch (IOException e) {
-                logError(e);
-              }
-            });
+    try (Stream<String> lines = Files.lines(p)) {
+      for (String line : (Iterable<String>) lines::iterator) {
+        os.write((line + "\n").getBytes(StandardCharsets.UTF_8));
       }
-
-    } catch (IOException e) {
-      logError(e);
     }
   }
 
@@ -207,6 +165,51 @@ public class App {
       return true;
     }
     return false;
+  }
+
+  private static void loadGitignore(
+      Path path,
+      Set<String> ignoredExtensions,
+      Set<String> ignoredFolders,
+      Set<String> ignoredNames) {
+
+    Path gitignore = path.resolve(".gitignore");
+    if (!Files.exists(gitignore)) return;
+
+    try {
+      for (String line : Files.readAllLines(gitignore)) {
+        line = line.trim();
+        if (line.isEmpty() || line.startsWith("#")) continue;
+
+        if (line.startsWith("*.")) {
+          ignoredExtensions.add(line.substring(1).toLowerCase());
+        } else if (line.endsWith("/")) {
+          ignoredFolders.add(line.substring(0, line.length() - 1));
+        } else if (!line.contains(".")) {
+          ignoredFolders.add(line);
+        } else {
+          ignoredNames.add(line);
+        }
+      }
+    } catch (IOException e) {
+      logError(e);
+    }
+  }
+
+  private static void validatePath(Path path) {
+    if (!Files.exists(path) || !Files.isDirectory(path)) {
+      throw new IllegalArgumentException("Invalid directory path");
+    }
+  }
+
+  private static Set<String> normalizeExtensions(List<String> args) {
+    Set<String> set = new HashSet<>();
+    for (String ext : args) {
+      ext = ext.toLowerCase();
+      if (!ext.startsWith(".")) ext = "." + ext;
+      set.add(ext);
+    }
+    return set;
   }
 
   private static void logError(Exception e) {
