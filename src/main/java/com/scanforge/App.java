@@ -53,10 +53,8 @@ public class App {
 
         if (line.startsWith("*.")) {
           ignoredExtensions.add(line.substring(1).toLowerCase());
-
         } else if (line.endsWith("/")) {
           ignoredFolders.add(line.substring(0, line.length() - 1));
-
         } else {
           ignoredNames.add(line);
         }
@@ -84,8 +82,8 @@ public class App {
               String ext = fileName.substring(index).toLowerCase();
 
               if (ignoredExtensions.contains(ext)) return;
-
               if (!requiredExtensions.contains(ext)) return;
+              if (isBinaryFile(p)) return;
 
               String header = "\n===== file: " + p.toAbsolutePath() + " =====\n";
 
@@ -108,5 +106,19 @@ public class App {
 
     outputStream.close();
     process.waitFor();
+  }
+
+  private static boolean isBinaryFile(Path path) {
+    try {
+      byte[] bytes = Files.readAllBytes(path);
+      int limit = Math.min(bytes.length, 1000);
+
+      for (int i = 0; i < limit; i++) {
+        if (bytes[i] == 0) return true;
+      }
+    } catch (Exception e) {
+      return true;
+    }
+    return false;
   }
 }
