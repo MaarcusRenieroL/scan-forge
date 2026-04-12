@@ -1,12 +1,13 @@
 package com.scanforge;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
 public class App {
-  public static void main(String[] args) throws Exception {
+  public static void main(String[] args) throws Exception, IOException {
 
     if (args.length < 2) {
       System.out.println("Usage: scanforge <path> <extensions...>");
@@ -50,7 +51,13 @@ public class App {
               String ext = fileName.substring(index).toLowerCase();
 
               if (requiredExtensions.contains(ext)) {
-                System.out.println(p.toAbsolutePath());
+                System.out.println("\n===== file: " + p.toAbsolutePath() + " =====");
+
+                try {
+                  Files.lines(p).forEach(System.out::println);
+                } catch (Exception e) {
+                  System.out.println("Error reading file: " + p.toAbsolutePath());
+                }
               }
             });
   }
