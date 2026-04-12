@@ -9,7 +9,6 @@ import java.util.stream.Stream;
 public class App {
   public static void main(String[] args) throws Exception {
 
-    // Validate args
     if (args.length < 2) {
       System.out.println("Usage: scanforge <path> <extensions...>");
       return;
@@ -29,53 +28,81 @@ public class App {
       return;
     }
 
-    // Normalize required extensions
     String[] requiredFileExtensions = Arrays.copyOfRange(args, 1, args.length);
 
     Set<String> requiredExtensions = new HashSet<>();
     for (String ext : requiredFileExtensions) {
       ext = ext.toLowerCase();
-      if (!ext.startsWith(".")) {
-        ext = "." + ext;
-      }
+      if (!ext.startsWith(".")) ext = "." + ext;
       requiredExtensions.add(ext);
     }
 
-    // Start clipboard process
+    Set<String> ignoredExtensions = new HashSet<>();
+    Set<String> ignoredFolders = new HashSet<>();
+    Set<String> ignoredNames = new HashSet<>();
+
+    Path gitignorePath = path.resolve(".gitignore");
+
+    if (Files.exists(gitignorePath)) {
+      List<String> lines = Files.readAllLines(gitignorePath);
+
+      for (String line : lines) {
+        line = line.trim();
+
+        if (line.isEmpty() || line.startsWith("#")) continue;
+
+        if (line.startsWith("*.")) {
+          ignoredExtensions.add(line.substring(1).toLowerCase());
+
+        } else if (line.endsWith("/")) {
+          ignoredFolders.add(line.substring(0, line.length() - 1));
+
+        } else {
+          ignoredNames.add(line);
+        }
+      }
+    }
+
     Process process = new ProcessBuilder("pbcopy").start();
     OutputStream outputStream = process.getOutputStream();
 
-    // Traverse and process files
     Files.walk(path)
         .filter(Files::isRegularFile)
         .forEach(
             p -> {
               String fileName = p.getFileName().toString();
-              int index = fileName.lastIndexOf('.');
 
+              for (String folder : ignoredFolders) {
+                if (p.toString().contains("/" + folder + "/")) return;
+              }
+
+              if (ignoredNames.contains(fileName)) return;
+
+              int index = fileName.lastIndexOf('.');
               if (index == -1 || index == 0) return;
 
               String ext = fileName.substring(index).toLowerCase();
 
-              if (requiredExtensions.contains(ext)) {
-                String header = "\n===== file: " + p.toAbsolutePath() + " =====\n";
+              if (ignoredExtensions.contains(ext)) return;
 
-                try {
-                  outputStream.write(header.getBytes(StandardCharsets.UTF_8));
+              if (!requiredExtensions.contains(ext)) return;
 
-                  try (Stream<String> lines = Files.lines(p)) {
-                    lines.forEach(
-                        line -> {
-                          try {
-                            outputStream.write((line + "\n").getBytes(StandardCharsets.UTF_8));
-                          } catch (Exception ignored) {
-                          }
-                        });
-                  }
+              String header = "\n===== file: " + p.toAbsolutePath() + " =====\n";
 
-                } catch (Exception ignored) {
-                  // skip unreadable files
+              try {
+                outputStream.write(header.getBytes(StandardCharsets.UTF_8));
+
+                try (Stream<String> lines = Files.lines(p)) {
+                  lines.forEach(
+                      line -> {
+                        try {
+                          outputStream.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+                        } catch (Exception ignored) {
+                        }
+                      });
                 }
+
+              } catch (Exception ignored) {
               }
             });
 
