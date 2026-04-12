@@ -3,11 +3,13 @@ package com.scanforge;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.*;
 
 public class App {
   public static void main(String[] args) throws Exception {
-    if (args.length == 0) {
-      System.out.println("Usage: scanforge <path>");
+
+    if (args.length < 2) {
+      System.out.println("Usage: scanforge <path> <extensions...>");
       return;
     }
 
@@ -25,24 +27,18 @@ public class App {
       return;
     }
 
-    Files.walk(path)
-        .filter(Files::isRegularFile)
-        .forEach(p -> System.out.println(p.toAbsolutePath()));
-    Set<String> existingFileExtensions = new HashSet<>();
+    String[] requiredFileExtensions = Arrays.copyOfRange(args, 1, args.length);
 
-    Files.walk(path)
-        .filter(Files::isRegularFile)
-        .forEach(
-            p -> {
-              String fileName = p.getFileName().toString();
-              int index = fileName.lastIndexOf('.');
+    Set<String> requiredExtensions = new HashSet<>();
+    for (String ext : requiredFileExtensions) {
+      ext = ext.toLowerCase();
+      if (!ext.startsWith(".")) {
+        ext = "." + ext;
+      }
+      requiredExtensions.add(ext);
+    }
 
-              if (index == -1 || index == 0) return;
-
-              String ext = fileName.substring(index).toLowerCase();
-              existingFileExtensions.add(ext);
-            });
-
-    existingFileExtensions.forEach(System.out::println);
+    System.out.println("Required extensions:");
+    requiredExtensions.forEach(System.out::println);
   }
 }
