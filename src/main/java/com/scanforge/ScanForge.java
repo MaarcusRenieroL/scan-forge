@@ -6,7 +6,7 @@ import java.nio.file.*;
 import java.util.*;
 import java.util.stream.Stream;
 
-public class App {
+public class ScanForge {
 
   public static void main(String[] args) {
     try {
