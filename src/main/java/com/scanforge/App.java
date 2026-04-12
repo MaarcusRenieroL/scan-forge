@@ -28,12 +28,17 @@ public class App {
 
       validatePath(path);
 
-      Set<String> existingExtensions = collectExtensions(path);
+      List<Path> allFiles = collectFiles(path);
+      Set<String> existingExtensions = collectExtensions(allFiles);
 
-      Set<String> requiredExtensions =
-          extArgs.isEmpty()
-              ? ExtensionSelector.select(existingExtensions)
-              : normalizeExtensions(extArgs);
+      SelectionResult result;
+
+      if (extArgs.isEmpty()) {
+        result = SelectorUI.select(existingExtensions, allFiles);
+      } else {
+        Set<String> normalized = normalizeExtensions(extArgs);
+        result = new SelectionResult(normalized, new HashSet<>());
+      }
 
       Set<String> ignoredExtensions = new HashSet<>();
       Set<String> ignoredFolders = new HashSet<>();
@@ -41,33 +46,59 @@ public class App {
 
       loadGitignore(path, ignoredExtensions, ignoredFolders, ignoredNames);
 
-      run(path, requiredExtensions, ignoredExtensions, ignoredFolders, ignoredNames);
+      Set<Path> finalFiles = resolveFinalFiles(allFiles, result);
+
+      run(finalFiles, ignoredExtensions, ignoredFolders, ignoredNames);
 
     } catch (Exception e) {
       logError(e);
     }
   }
 
-  private static Set<String> collectExtensions(Path path) throws IOException {
-    Set<String> extensions = new HashSet<>();
+  private static List<Path> collectFiles(Path path) throws IOException {
+    List<Path> files = new ArrayList<>();
 
     try (Stream<Path> paths = Files.walk(path)) {
-      paths
-          .filter(Files::isRegularFile)
-          .forEach(
-              p -> {
-                String name = p.getFileName().toString();
-                int i = name.lastIndexOf('.');
-                if (i > 0) extensions.add(name.substring(i).toLowerCase());
-              });
+      paths.filter(Files::isRegularFile).forEach(files::add);
+    }
+
+    return files;
+  }
+
+  private static Set<String> collectExtensions(List<Path> files) {
+    Set<String> extensions = new HashSet<>();
+
+    for (Path p : files) {
+      String name = p.getFileName().toString();
+      int i = name.lastIndexOf('.');
+      if (i > 0) {
+        extensions.add(name.substring(i).toLowerCase());
+      }
     }
 
     return extensions;
   }
 
+  private static Set<Path> resolveFinalFiles(List<Path> allFiles, SelectionResult result) {
+    Set<Path> finalFiles = new HashSet<>();
+
+    for (Path p : allFiles) {
+      String name = p.getFileName().toString();
+      int i = name.lastIndexOf('.');
+      if (i > 0) {
+        String ext = name.substring(i).toLowerCase();
+        if (result.extensions.contains(ext)) {
+          finalFiles.add(p);
+        }
+      }
+    }
+
+    finalFiles.addAll(result.files);
+    return finalFiles;
+  }
+
   private static void run(
-      Path path,
-      Set<String> requiredExtensions,
+      Set<Path> files,
       Set<String> ignoredExtensions,
       Set<String> ignoredFolders,
       Set<String> ignoredNames)
@@ -75,15 +106,10 @@ public class App {
 
     Process process = new ProcessBuilder("pbcopy").start();
 
-    try (OutputStream os = process.getOutputStream();
-        Stream<Path> paths = Files.walk(path)) {
-
-      paths
-          .filter(Files::isRegularFile)
-          .forEach(
-              p ->
-                  processFile(
-                      p, requiredExtensions, ignoredExtensions, ignoredFolders, ignoredNames, os));
+    try (OutputStream os = process.getOutputStream()) {
+      for (Path p : files) {
+        processFile(p, ignoredExtensions, ignoredFolders, ignoredNames, os);
+      }
     }
 
     process.waitFor();
@@ -91,7 +117,6 @@ public class App {
 
   private static void processFile(
       Path p,
-      Set<String> requiredExtensions,
       Set<String> ignoredExtensions,
       Set<String> ignoredFolders,
       Set<String> ignoredNames,
@@ -101,13 +126,6 @@ public class App {
       String name = p.getFileName().toString();
 
       if (isIgnored(p, name, ignoredExtensions, ignoredFolders, ignoredNames)) return;
-
-      int i = name.lastIndexOf('.');
-      if (i <= 0) return;
-
-      String ext = name.substring(i).toLowerCase();
-
-      if (!requiredExtensions.contains(ext)) return;
       if (isBinaryFile(p)) return;
 
       writeFile(p, os);
@@ -126,12 +144,9 @@ public class App {
 
     for (Path part : p) {
       String segment = part.toString();
-
       if (ignoredFolders.contains(segment)) return true;
       if (ignoredNames.contains(segment)) return true;
     }
-
-    if (ignoredNames.contains(name)) return true;
 
     int i = name.lastIndexOf('.');
     if (i > 0) {
