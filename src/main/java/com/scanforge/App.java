@@ -5,7 +5,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public class App {
-  public static void main(String[] args) {
+  public static void main(String[] args) throws Exception {
     if (args.length == 0) {
       System.out.println("Usage: scanforge <path>");
       return;
@@ -24,5 +24,9 @@ public class App {
       System.out.println("Invalid directory path");
       return;
     }
+
+    Files.walk(path)
+        .filter(Files::isRegularFile)
+        .forEach(p -> System.out.println(p.toAbsolutePath()));
   }
 }
